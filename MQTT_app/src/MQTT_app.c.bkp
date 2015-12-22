@@ -1,0 +1,17 @@
+/*
+ ============================================================================
+ Name        : MQTT_app.c
+ Author      : raph
+ Version     :
+ Copyright   : Your copyright notice
+ Description : Hello World in C, Ansi-style
+ ============================================================================
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void) {
+	printf("test\n"); /* prints  */
+	return EXIT_SUCCESS;
+}
