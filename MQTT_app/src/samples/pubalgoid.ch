@@ -22,7 +22,7 @@
 #include "lib_crc.h"
 #include "time.h"
 
-#define ADDRESS     "192.168.1.1:1883"
+#define ADDRESS     "localhost:1883"
 #define CLIENTID    "ExampleClientPub"
 #define TOPIC       "MQTT"
 //#define PAYLOAD     "Sync Hello World"
@@ -30,7 +30,7 @@
 #define TIMEOUT     10000L
 
 
-unsigned char PAYLOAD[100]={1,00,02,255,255,02,0,04, 0xa2, 02, 0xaa, 0xaa, 3, 0, 3, 61, 62, 63, 0,0};
+unsigned char PAYLOAD[100]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
 
 int main(int argc, char* argv[])
 {
@@ -61,6 +61,8 @@ int main(int argc, char* argv[])
 		PAYLOAD[3]=(msgID & 0xFF00)>>8;
 		PAYLOAD[4]=msgID & 0x00FF;
 
+		PAYLOAD[8]= rand() & 0x00FF;
+		PAYLOAD[15]= rand() & 0x00FF;
 
 	    unsigned short crc16=0;
 	    for(j=0;j < 18;j++){

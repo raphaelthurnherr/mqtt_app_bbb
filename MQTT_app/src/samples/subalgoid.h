@@ -23,6 +23,8 @@
 #define PS_CHAR   0xa3
 #define PS_HOLE   0xa4
 #define PS_COLL	  0xa5
+#define PS_COLR	  0xa6
+#define PS_SHORT  0xa7
 
 // ARRAY PARAMETER OF ALGOID MESSAGE
 #define PA_INT	  0xb2
