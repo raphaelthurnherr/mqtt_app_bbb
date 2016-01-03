@@ -30,4 +30,16 @@
 #define PA_INT	  0xb2
 #define PA_STR	  0xb3
 
+// DEFINITION DE LA STRUCTURE DU MESSAGE ALGOID
+typedef struct{
+	unsigned short msg_id; 			// Algoid message ID
+	unsigned short msg_type;		// Algoid Type command/event/ack/negociation/error, etc
+	int msg_type_value;				// Algoid Type value for type
+	short msg_param;				// Algoid parameter (optionnal)
+	int msg_param_value;			// Algoid parameter value
+	unsigned char msg_param_array[100];  // Algoid parameter array (if parameter is 0xb2, 0xb3)
+	unsigned short msg_param_count;		 // Number of parameter
+	char topicName[25];					 // MQTT Topic name
+} ALGOID;
+
 #endif /* SAMPLES_SUBALGOID_H_ */
