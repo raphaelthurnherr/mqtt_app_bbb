@@ -42,4 +42,6 @@ typedef struct{
 	char topicName[25];					 // MQTT Topic name
 } ALGOID;
 
+char AlgoidMessageReady;
+
 #endif /* SAMPLES_SUBALGOID_H_ */

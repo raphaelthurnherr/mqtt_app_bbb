@@ -1,20 +1,10 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2013 IBM Corp.
+ *	Librairie pour communication protocol ALGOID
+ *	Nécéssite les source PAHO MQTT.
+ *	MAJ: 04.01.2016 / Raphael Thurnherr
  *
- * All rights reserved. This program and the accompanying materials
- * are made available under the terms of the Eclipse Public License v1.0
- * and Eclipse Distribution License v1.0 which accompany this distribution. 
  *
- * The Eclipse Public License is available at 
- *   http://www.eclipse.org/legal/epl-v10.html
- * and the Eclipse Distribution License is available at 
- *   http://www.eclipse.org/org/documents/edl-v10.php.
- *
- * Contributors:
- *    Ian Craggs - initial contribution
  *******************************************************************************/
-// Version du 03.01.15
-
 
 #include "stdio.h"
 #include "stdlib.h"
@@ -26,40 +16,52 @@
 #define ADDRESS     "localhost:1883"
 #define CLIENTID    "Algoid"
 #define TOPIC       "MQTT"
-
 #define QOS         0
 #define TIMEOUT     10000L
 
 MQTTClient_deliveryToken deliveredtoken, token;
 MQTTClient client;
 
-unsigned char PAYLOAD[100]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
-
-char mqtt_rcv_message[309]; // 3x byte TL + 3x100 bytes V
-unsigned char algo_command[3][103];
-unsigned char algoMsgStackPtr;
-
 // Variable d'entrée/sortie vers algoid
 ALGOID algoidMsgRXStack[10], algoidMsgRX;
 
-void processMqttMsg(unsigned int msgLen, char *topicName);
 
-int mqtt_init(void);
+int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message); 	// Call-back message MQTT recu
+void delivered(void *context, MQTTClient_deliveryToken dt);		// Call-back message MQTT emis
+void connlost(void *context, char *cause);						// Call-back perte de connexion MQTT
 
-long algo_GetTypeValue(unsigned char *MsgVal);
-long algo_GetParamValue(unsigned char *MsgVal, unsigned char byteLen);
-void algo_clearStack(unsigned char ptr);
+// Initialisation connexion MQTT (IPADDR:PORT, CLIENT ID, FUNC CALL-BACK MSG RECU)
+int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArrived* msgarr);
 
-unsigned char algo_getMessage(void);
+// Construction message algoid, controle CRC algo message, empilage des messages dans variable type ALGOID
+void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID *destMsgStack);
+
+// Retourne la donnée codée sur n bytes
+long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen);
+
+// Récupère le premier message disponible dans la pile
+unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack);
+
+// Efface un champs donné dans la pile de message
+void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack);
+
+// !!!!!!!!!!!   FONCTION DEBUG  A RETRAVAILLER...
 int algo_putMessage(char *topic, unsigned short msgID, unsigned char *data, unsigned short lenght);
 
+
+// ------------------------------------------------------------------------------------
+// MAIN: Point d'entrée programme, initialisation connexion MQTT, souscription et publication
+// ------------------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
+	// Trame de test de type ALGOID à publier
+	unsigned char PAYLOAD[100]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
 	int ch;
 	int err;
+	unsigned char i;
 
 	printf("\nTentative de connexion au brocker MQTT...\n");
-	err=mqtt_init();
+	err=mqtt_init(ADDRESS, CLIENTID, msgarrvd);
 
 	if(!err){
 		printf("- réussite, tentative de souscription topic MQTT: ");
@@ -70,9 +72,28 @@ int main(int argc, char* argv[])
 
     do 
     {
+    	// - Test: traitement du message algoid recu
+    	if(AlgoidMessageReady){
+    		if(AlgoidMessageReady==1){
+    			printf("\n Main: MESSAGE MQTT ALGOID VALID RECU: %d \n", AlgoidMessageReady);
+
+    			// Affichage des messages de la piles
+    		    for (i=0;i<10;i++)
+    		    {
+    		    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, value: %d, param: %d, value: %d",i,algoidMsgRXStack[i].topicName, (algoidMsgRXStack[i].msg_id&0xF000), algoidMsgRXStack[i].msg_id, algoidMsgRXStack[i].msg_type,
+    		    			algoidMsgRXStack[i].msg_type_value, algoidMsgRXStack[i].msg_param, algoidMsgRXStack[i].msg_param_value);
+    		    }
+    		    printf("\n");
+    		}
+    		else printf("\n Main: MESSAGE MQTT NON-ALGOID RECU \n");
+
+    		AlgoidMessageReady=0;
+    	}
+    	// -----------------------
+
         ch = getchar();
         if(ch=='d'){
-        	if(algo_getMessage())printf("\nOK\n");
+        	if(algo_getMessage(algoidMsgRX, algoidMsgRXStack))printf("\nOK\n");
         	else printf("\nPAS DE MESSAGE\n");
         }
         if((ch=='a')){
@@ -93,6 +114,7 @@ int main(int argc, char* argv[])
     		result=algo_putMessage("MQTT", al_msgID, PAYLOAD, 20);
         	if(!result) printf("Message with delivery token %d delivered\n", token);
         }
+
     } while(ch != 'Q' && ch != 'q');
 
     MQTTClient_disconnect(client, 10000);
@@ -101,17 +123,25 @@ int main(int argc, char* argv[])
 }
 
 
+// -------------------------------------------------------------------
+// Fonction Call-back de retour de token MQTT pour contrôle
+// -------------------------------------------------------------------
+
 void delivered(void *context, MQTTClient_deliveryToken dt)
 {
     printf("Message with token value %d delivery confirmed\n", dt);
     deliveredtoken = dt;
-    //token=dt;
 }
 
+
+// -------------------------------------------------------------------
+// Fonction Call-Back récéption d'un message MQTT
+// -------------------------------------------------------------------
 int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message)
 {
     unsigned int i;
     char* payloadptr;
+    char mqtt_rcv_message[309]; // 3x byte TL + 3x100 bytes V
 
     payloadptr = message->payload;
     for(i=0; i<message->payloadlen; i++)
@@ -119,13 +149,18 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
         mqtt_rcv_message[i]=payloadptr[i];
     }
 
-    processMqttMsg(message->payloadlen, topicName);
+    // Reconstruction du message ALGOID
+    processMqttMsg(mqtt_rcv_message, message->payloadlen, topicName, algoidMsgRXStack);
 
     MQTTClient_freeMessage(&message);
     MQTTClient_free(topicName);
     return 1;
 }
 
+
+// -------------------------------------------------------------------
+// Fonction call-back perte de connexion avec le brocker
+// -------------------------------------------------------------------
 void connlost(void *context, char *cause)
 {
     printf("\nConnection lost\n");
@@ -133,25 +168,10 @@ void connlost(void *context, char *cause)
 }
 
 
-//--------  algo_GetMessageIDalgo_GetMessageID
-//Decode l'identifiant du message
-long algo_GetTypeValue(unsigned char *MsgVal){
-	long myVal;
-	unsigned short idLenght;
-
-	unsigned char i;
-
-	idLenght=(MsgVal[1]<<8)+MsgVal[2];
-
-	myVal=0;
-
-	for(i=0;i<idLenght;i++){
-		myVal = (myVal<<8)+MsgVal[i+3];
-	}
-	return(myVal);
-}
-
-long algo_GetParamValue(unsigned char *MsgVal, unsigned char byteLen){
+// -------------------------------------------------------------------
+// retourne la valeur codée sur n bytes, d'un champ de la trame algoid
+// -------------------------------------------------------------------
+long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen){
 	long myVal;
 	unsigned short idLenght;
 
@@ -166,22 +186,31 @@ long algo_GetParamValue(unsigned char *MsgVal, unsigned char byteLen){
 	return(myVal);
 }
 
-// Efface les champs de la stucture
-void algo_clearStack(unsigned char ptr){
+
+// -------------------------------------------------------------------
+// Efface les champs d'un emplacemment donné dans la pile
+// -------------------------------------------------------------------
+void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack){
 	unsigned char i;
 
-	algoidMsgRXStack[ptr].msg_id=0;
-	algoidMsgRXStack[ptr].msg_type=0;
-	algoidMsgRXStack[ptr].msg_type_value=0;
-	algoidMsgRXStack[ptr].msg_param=0;
-	algoidMsgRXStack[ptr].msg_param_count=0;
-	algoidMsgRXStack[ptr].msg_param_value=0;
-	for(i=0;i<100;i++) algoidMsgRXStack[ptr].msg_param_array[i]=0;
-	for(i=0;i<sizeof(algoidMsgRXStack[ptr].topicName);i++)algoidMsgRXStack[ptr].topicName[i]=0;
+	destMsgStack[ptr].msg_id=0;
+	destMsgStack[ptr].msg_type=0;
+	destMsgStack[ptr].msg_type_value=0;
+	destMsgStack[ptr].msg_param=0;
+	destMsgStack[ptr].msg_param_count=0;
+	destMsgStack[ptr].msg_param_value=0;
+	for(i=0;i<100;i++) destMsgStack[ptr].msg_param_array[i]=0;
+	for(i=0;i<sizeof(destMsgStack[ptr].topicName);i++)destMsgStack[ptr].topicName[i]=0;
 }
 
-// Traite la trame MQTT recu
-void processMqttMsg(unsigned int msgLen, char *topicName){
+
+// -------------------------------------------------------------------
+// Construction message algoid, controle CRC algo message, empilage des messages dans variable type ALGOID
+// -------------------------------------------------------------------
+void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID *destMsgStack){
+
+	static unsigned char algoMsgStackPtr;
+	unsigned char algo_command[3][103];
 
     //--------- DECODAGE DU MESSAGE RECU
 	unsigned int i;
@@ -192,34 +221,37 @@ void processMqttMsg(unsigned int msgLen, char *topicName){
     unsigned short dataLenght;
     unsigned short dataCommandCount;
 
-    printf("Topic: %s\n", topicName);
-    printf("Payload: %d\n",msgLen);
+    printf("\n-------------------------------------");
+    printf("\nNOUVEAU MESSAGE MQTT RECU");
+    printf("\n-------------------------------------");
+    printf("\n Topic: %s", topicName);
 
     unsigned short crc16=0;
     unsigned short msg_crc;
 
     for(countDataFrame=0;countDataFrame < msgLen-2;countDataFrame++){
-    	crc16=update_crc_16(crc16, mqtt_rcv_message[countDataFrame]);
+    	crc16=update_crc_16(crc16, mqttMsg[countDataFrame]);
     }
 
-    msg_crc=(mqtt_rcv_message[msgLen-2]<<8)+(mqtt_rcv_message[msgLen-1]);
+    msg_crc=(mqttMsg[msgLen-2]<<8)+(mqttMsg[msgLen-1]);
 
-    printf("\n CRC MESSAGE: %d, CRC CALC: %d  \n",msg_crc ,crc16);
+
 
     if(msg_crc==crc16){
        indexCommand=0;
 
+       printf("\n CRC MESSAGE: %d, CRC CALC: %d  \n",msg_crc ,crc16);
 
        for(countDataFrame=0;countDataFrame < msgLen-2;){
 
     	// Calcule de la longeur des donnéee de la commande
-    	    dataLenght=(mqtt_rcv_message[countDataFrame+1]<<8)+mqtt_rcv_message[countDataFrame+2];
+    	    dataLenght=(mqttMsg[countDataFrame+1]<<8)+mqttMsg[countDataFrame+2];
 
-        	printf("\n datalenght: %d -> ", dataLenght);
+        	printf("\n ALGOID MESSAGE: -> ", dataLenght);
 
         	// Recuperation des messages contenu dans la trame.
         	for(dataCommandCount=0;dataCommandCount < dataLenght+3;dataCommandCount++){
-        		algo_command[indexCommand][dataCommandCount] = mqtt_rcv_message[countDataFrame];
+        		algo_command[indexCommand][dataCommandCount] = mqttMsg[countDataFrame];
         		printf(" %d ",algo_command[indexCommand][dataCommandCount]);
         		countDataFrame++;
         	}
@@ -228,42 +260,42 @@ void processMqttMsg(unsigned int msgLen, char *topicName){
 
        printf("\n");
        // Recherche un emplacement libre dans la pile de messages
-       for(algoMsgStackPtr=0;(algoidMsgRXStack[algoMsgStackPtr].msg_id!=0) && algoMsgStackPtr<10;algoMsgStackPtr++);
+       for(algoMsgStackPtr=0;(destMsgStack[algoMsgStackPtr].msg_id!=0) && algoMsgStackPtr<10;algoMsgStackPtr++);
 
        if(algoMsgStackPtr>=10)
-    	   printf("\n!!! ALGO MESSAGES STACK OVERFLOW !!!\n");
+    	   printf("\n!!! ALGO MESSAGES STACK OVERFLOW !!!");
        else
-    	   strcpy(algoidMsgRXStack[algoMsgStackPtr].topicName,topicName);
+    	   strcpy(destMsgStack[algoMsgStackPtr].topicName,topicName);
 
 		   for(indexCommand=0;indexCommand<3;indexCommand++){
 			   switch( algo_command[indexCommand][0]){
-					case T_MSGID : algoidMsgRXStack[algoMsgStackPtr].msg_id=algo_GetTypeValue(algo_command[indexCommand]);
+					case T_MSGID : destMsgStack[algoMsgStackPtr].msg_id=algo_GetValue(algo_command[indexCommand], 1);
 								  break;
-					case T_CMD	: algoidMsgRXStack[algoMsgStackPtr].msg_type=T_CMD;
-								  algoidMsgRXStack[algoMsgStackPtr].msg_type_value=algo_GetTypeValue(algo_command[indexCommand]);
+					case T_CMD	: destMsgStack[algoMsgStackPtr].msg_type=T_CMD;
+								destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
 								  break;
-					case T_MSGANS : algoidMsgRXStack[algoMsgStackPtr].msg_type=T_MSGANS;
-									algoidMsgRXStack[algoMsgStackPtr].msg_type_value=algo_GetTypeValue(algo_command[indexCommand]);
+					case T_MSGANS : destMsgStack[algoMsgStackPtr].msg_type=T_MSGANS;
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
 									break;
-					case T_MSGACK : algoidMsgRXStack[algoMsgStackPtr].msg_type=T_MSGACK;
-									algoidMsgRXStack[algoMsgStackPtr].msg_type_value=algo_GetTypeValue(algo_command[indexCommand]);
+					case T_MSGACK : destMsgStack[algoMsgStackPtr].msg_type=T_MSGACK;
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
 									break;
-					case T_EVENT : algoidMsgRXStack[algoMsgStackPtr].msg_type=T_EVENT;
-								   algoidMsgRXStack[algoMsgStackPtr].msg_type_value=algo_GetTypeValue(algo_command[indexCommand]);
+					case T_EVENT : destMsgStack[algoMsgStackPtr].msg_type=T_EVENT;
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
 								   break;
-					case T_ERROR : algoidMsgRXStack[algoMsgStackPtr].msg_type=T_ERROR;
-								   algoidMsgRXStack[algoMsgStackPtr].msg_type_value=algo_GetTypeValue(algo_command[indexCommand]);
+					case T_ERROR : destMsgStack[algoMsgStackPtr].msg_type=T_ERROR;
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
 								   break;
 
 					case T_IDNEG : break;
 
 					case PS_BOOL : break;
-					case PS_INT : algoidMsgRXStack[algoMsgStackPtr].msg_param=PS_INT;
-									algoidMsgRXStack[algoMsgStackPtr].msg_param_value=algo_GetParamValue(algo_command[indexCommand], 4); break;
-					case PS_CHAR : algoidMsgRXStack[algoMsgStackPtr].msg_param=PS_CHAR;
-									algoidMsgRXStack[algoMsgStackPtr].msg_param_value=algo_GetParamValue(algo_command[indexCommand], 1); break;
-					case PS_SHORT : algoidMsgRXStack[algoMsgStackPtr].msg_param=PS_SHORT;
-									algoidMsgRXStack[algoMsgStackPtr].msg_param_value=algo_GetParamValue(algo_command[indexCommand], 2); break;
+					case PS_INT : destMsgStack[algoMsgStackPtr].msg_param=PS_INT;
+					destMsgStack[algoMsgStackPtr].msg_param_value=algo_GetValue(algo_command[indexCommand], 4); break;
+					case PS_CHAR : destMsgStack[algoMsgStackPtr].msg_param=PS_CHAR;
+					destMsgStack[algoMsgStackPtr].msg_param_value=algo_GetValue(algo_command[indexCommand], 1); break;
+					case PS_SHORT : destMsgStack[algoMsgStackPtr].msg_param=PS_SHORT;
+					destMsgStack[algoMsgStackPtr].msg_param_value=algo_GetValue(algo_command[indexCommand], 2); break;
 					case PS_HOLE : break;
 					case PS_COLL : break;
 					case PS_COLR : break;
@@ -273,30 +305,37 @@ void processMqttMsg(unsigned int msgLen, char *topicName){
 					default : break;
 			   }
 		   }
-
-    }else printf("\n ***** MESSAGE INVALID, CRC MESSAGE: %d, CRC CALC: %d ***** \n",msg_crc ,crc16);
-
+		   AlgoidMessageReady=1;
+    }else{
+    	AlgoidMessageReady=-1;
+    	printf("\n ***** MESSAGE ALGOID INVALID, CRC MESSAGE: %d, CRC CALC: %d ***** \n",msg_crc ,crc16);
+    }
+/*
     for (i=0;i<10;i++)
     {
-    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, value: %d, param: %d, value: %d",i,algoidMsgRXStack[i].topicName, (algoidMsgRXStack[i].msg_id&0xF000), algoidMsgRXStack[i].msg_id, algoidMsgRXStack[i].msg_type,
-    	    		   	   	   	   	   	   	   	   	   	   	   	   	   	 algoidMsgRXStack[i].msg_type_value, algoidMsgRXStack[i].msg_param,
-    																	 algoidMsgRXStack[i].msg_param_value);
+    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, value: %d, param: %d, value: %d",i,destMsgStack[i].topicName, (destMsgStack[i].msg_id&0xF000), destMsgStack[i].msg_id, destMsgStack[i].msg_type,
+    			destMsgStack[i].msg_type_value, destMsgStack[i].msg_param,
+				destMsgStack[i].msg_param_value);
     }
     printf("\n");
+    */
     //---------
 
 }
 
 
-unsigned char algo_getMessage(void){
+// -------------------------------------------------------------------
+// Récupère le premier message disponible dans la pile
+// -------------------------------------------------------------------
+unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
 	unsigned char i;
-	if(algoidMsgRXStack[0].msg_id != 0){
-		algoidMsgRX=algoidMsgRXStack[0];
+	if(srcMsgStack[0].msg_id != 0){
+		destMsg=srcMsgStack[0];
 
 		for(i=0;i<9;i++){
-			algoidMsgRXStack[i]=algoidMsgRXStack[i+1];
+			srcMsgStack[i]=srcMsgStack[i+1];
 		}
-		algo_clearStack(9);
+		algo_clearStack(9, srcMsgStack);
 		return 1;
 	}
 	else{
@@ -305,22 +344,24 @@ unsigned char algo_getMessage(void){
 }
 
 
+// -------------------------------------------------------------------
 // INITIALISATION DE LA CONNEXION AU BROCKER MQTT
-int mqtt_init(void){
+// -------------------------------------------------------------------
+int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArrived* msgarr){
 		int rc;
 
 		MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
 		//MQTTClient_message pubmsg = MQTTClient_message_initializer;
 
 		// Configuration des paramètres de connexion
-		MQTTClient_create(&client, ADDRESS, CLIENTID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
+		MQTTClient_create(&client, IPaddress, clientID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
 		conn_opts.keepAliveInterval = 20;
 		conn_opts.cleansession = 1;
 		// Fin de config connexion
 
 		// Configuration de la fonction callback de souscription
-		MQTTClient_setCallbacks(client, NULL, connlost, msgarrvd, delivered);
+		MQTTClient_setCallbacks(client, NULL, connlost, msgarr, delivered);
 
 		// Tentative de connexion au broker mqtt
 		if ((rc = MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS)
@@ -330,6 +371,9 @@ int mqtt_init(void){
 		}else return 0;
 	}
 
+	// -------------------------------------------------------------------
+	// !!!!!!!!!!!   FONCTION DEBUG  A RETRAVAILLER...
+	// -------------------------------------------------------------------
 	int algo_putMessage(char *topic, unsigned short msgID, unsigned char *data, unsigned short lenght){
     	short j;
     	int rc;
