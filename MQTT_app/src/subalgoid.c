@@ -1,6 +1,6 @@
 /*******************************************************************************
  *	Librairie pour communication protocol ALGOID
- *	Nécéssite les source PAHO MQTT.
+ *	Nï¿½cï¿½ssite les source PAHO MQTT.
  *	MAJ: 04.01.2016 / Raphael Thurnherr
  *
  *
@@ -22,7 +22,7 @@
 MQTTClient_deliveryToken deliveredtoken, token;
 MQTTClient client;
 
-// Variable d'entrée/sortie vers algoid
+// Variable d'entrï¿½e/sortie vers algoid
 ALGOID algoidMsgRXStack[10], algoidMsgRX;
 
 
@@ -36,13 +36,13 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 // Construction message algoid, controle CRC algo message, empilage des messages dans variable type ALGOID
 void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID *destMsgStack);
 
-// Retourne la donnée codée sur n bytes
+// Retourne la donnï¿½e codï¿½e sur n bytes
 long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen);
 
-// Récupère le premier message disponible dans la pile
+// Rï¿½cupï¿½re le premier message disponible dans la pile
 unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack);
 
-// Efface un champs donné dans la pile de message
+// Efface un champs donnï¿½ dans la pile de message
 void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack);
 
 // !!!!!!!!!!!   FONCTION DEBUG  A RETRAVAILLER...
@@ -50,21 +50,22 @@ int algo_putMessage(char *topic, unsigned short msgID, unsigned char *data, unsi
 
 
 // ------------------------------------------------------------------------------------
-// MAIN: Point d'entrée programme, initialisation connexion MQTT, souscription et publication
+// MAIN: Point d'entrï¿½e programme, initialisation connexion MQTT, souscription et publication
 // ------------------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
-	// Trame de test de type ALGOID à publier
+	// Trame de test de type ALGOID ï¿½ publier
 	unsigned char PAYLOAD[100]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
 	int ch;
 	int err;
 	unsigned char i;
 
+	printf("\nMQQT-ALGO test 06/01/2016\n");
 	printf("\nTentative de connexion au brocker MQTT...\n");
 	err=mqtt_init(ADDRESS, CLIENTID, msgarrvd);
 
 	if(!err){
-		printf("- réussite, tentative de souscription topic MQTT: ");
+		printf("- rï¿½ussite, tentative de souscription topic MQTT: ");
 		// Configuration souscription
 		if(!MQTTClient_subscribe(client, TOPIC, QOS))printf("OK\n");
 		else printf("ERREUR\n");
@@ -101,14 +102,14 @@ int main(int argc, char* argv[])
         	int result;
 
         	//token=rand();
-        	al_msgID=(short)rand();						// Génération d'un ID aléatoire
+        	al_msgID=(short)rand();						// Gï¿½nï¿½ration d'un ID alï¿½atoire
     		printf("\nMessage ID: %d", al_msgID);
 
-    		// Génération des données aléatoire de test
+    		// Gï¿½nï¿½ration des donnï¿½es alï¿½atoire de test
     		PAYLOAD[8]= rand() & 0x00FF;
     		PAYLOAD[15]= rand() & 0x00FF;
 
-    		al_msgID = (al_msgID & 0x0FFF) | 0xA000;    // Ajout d'un code expéditeur
+    		al_msgID = (al_msgID & 0x0FFF) | 0xA000;    // Ajout d'un code expï¿½diteur
 
     		// Envoie du message
     		result=algo_putMessage("MQTT", al_msgID, PAYLOAD, 20);
@@ -124,7 +125,7 @@ int main(int argc, char* argv[])
 
 
 // -------------------------------------------------------------------
-// Fonction Call-back de retour de token MQTT pour contrôle
+// Fonction Call-back de retour de token MQTT pour contrï¿½le
 // -------------------------------------------------------------------
 
 void delivered(void *context, MQTTClient_deliveryToken dt)
@@ -135,7 +136,7 @@ void delivered(void *context, MQTTClient_deliveryToken dt)
 
 
 // -------------------------------------------------------------------
-// Fonction Call-Back récéption d'un message MQTT
+// Fonction Call-Back rï¿½cï¿½ption d'un message MQTT
 // -------------------------------------------------------------------
 int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message)
 {
@@ -169,7 +170,7 @@ void connlost(void *context, char *cause)
 
 
 // -------------------------------------------------------------------
-// retourne la valeur codée sur n bytes, d'un champ de la trame algoid
+// retourne la valeur codï¿½e sur n bytes, d'un champ de la trame algoid
 // -------------------------------------------------------------------
 long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen){
 	long myVal;
@@ -188,7 +189,7 @@ long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen){
 
 
 // -------------------------------------------------------------------
-// Efface les champs d'un emplacemment donné dans la pile
+// Efface les champs d'un emplacemment donnï¿½ dans la pile
 // -------------------------------------------------------------------
 void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack){
 	unsigned char i;
@@ -244,7 +245,7 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 
        for(countDataFrame=0;countDataFrame < msgLen-2;){
 
-    	// Calcule de la longeur des donnéee de la commande
+    	// Calcule de la longeur des donnï¿½ee de la commande
     	    dataLenght=(mqttMsg[countDataFrame+1]<<8)+mqttMsg[countDataFrame+2];
 
         	printf("\n ALGOID MESSAGE: -> ", dataLenght);
@@ -325,7 +326,7 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 
 
 // -------------------------------------------------------------------
-// Récupère le premier message disponible dans la pile
+// Rï¿½cupï¿½re le premier message disponible dans la pile
 // -------------------------------------------------------------------
 unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
 	unsigned char i;
@@ -353,7 +354,7 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
 		//MQTTClient_message pubmsg = MQTTClient_message_initializer;
 
-		// Configuration des paramètres de connexion
+		// Configuration des paramï¿½tres de connexion
 		MQTTClient_create(&client, IPaddress, clientID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
 		conn_opts.keepAliveInterval = 20;
@@ -383,7 +384,7 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
     	data[3]=(msgID & 0xFF00)>>8;
 		data[4]=msgID & 0x00FF;
 
-		// Génération du CRC du message
+		// Gï¿½nï¿½ration du CRC du message
 		for(j=0;j < 18;j++){
 			crc16=update_crc_16(crc16, data[j]);
 		}
