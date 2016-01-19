@@ -67,14 +67,14 @@ int main(int argc, char* argv[])
 {
 
 	// Trame de test de type ALGOID a publier
-	unsigned char PAYLOADRX[100]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
-	unsigned char PAYLOADTX[100]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
+	unsigned char PAYLOADRX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
+	unsigned char PAYLOADTX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
 
 	int ch;
 	int err;
-	unsigned char i,j;
+	unsigned char i,j, ptrParam;
 
-	printf("\nMQQT-ALGO POC 09/01/2016\n");
+	printf("\nMQQT-ALGO POC 19/01/2016\n");
 	printf("\nTentative de connexion au brocker MQTT...\n");
 
 	err=mqtt_init(ADDRESS, CLIENTID, msgarrvd);
@@ -96,10 +96,18 @@ int main(int argc, char* argv[])
     			// Affichage des messages de la piles
     		    for (i=0;i<10;i++)
     		    {
-    		    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, value: %d, param: %d, value: %d",i,algoidMsgRXStack[i].topicName, ((algoidMsgRXStack[i].msg_id&0xFF000000)>>24), algoidMsgRXStack[i].msg_id, algoidMsgRXStack[i].msg_type,
-    		    			algoidMsgRXStack[i].msg_type_value, algoidMsgRXStack[i].msg_param, algoidMsgRXStack[i].msg_param_value);
-    		    	printf("\n        array: ");
-    		    	for(j=0;j<algoidMsgRXStack[i].msg_param_count;j++) printf("%d ", algoidMsgRXStack[i].msg_param_array[j]);
+    		    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, cmd value: %d",i,algoidMsgRXStack[i].topicName, ((algoidMsgRXStack[i].msg_id&0xFF000000)>>24), algoidMsgRXStack[i].msg_id, algoidMsgRXStack[i].msg_type,
+    		    	    		    			algoidMsgRXStack[i].msg_type_value);
+    		    	for(ptrParam=0;algoidMsgRXStack[i].msg_param[ptrParam]!=0;ptrParam++){
+
+    		    	 if(algoidMsgRXStack[i].msg_param[ptrParam]==0xa1)
+
+    		    		 printf("\n        value: %d",algoidMsgRXStack[i].msg_param_value[ptrParam]);
+    		    	 if(algoidMsgRXStack[i].msg_param[ptrParam]==0xb1){
+    		    		 printf("\n        array: ");
+    		    		 for(j=0;j<algoidMsgRXStack[i].msg_param_count[ptrParam];j++) printf("%d ", algoidMsgRXStack[i].msg_param_array[ptrParam][j]);
+    		    	 }
+    		    	}
     		    	printf("\n");
     		    }
     		    printf("\n");
@@ -125,16 +133,29 @@ int main(int argc, char* argv[])
 
         	algoidMsgTX.msg_type=T_CMD;
         	algoidMsgTX.msg_type_value=0x03;
-        	algoidMsgTX.msg_param=PS_1;
-        	algoidMsgTX.msg_param_value=((rand()<<16)+rand())&0x00FFFFFF;
 
-        	algoidMsgTX.msg_param_count=rand()&0x0000000F;;
-        	printf("\nSND: ");
-        	algoidMsgTX.msg_param=PAS_1;
+        	algoidMsgTX.msg_param[1]=PAS_1;
+        	algoidMsgTX.msg_param_count[1]=rand()&0x000000F;
+        	for(i=0;i<algoidMsgTX.msg_param_count[1];i++)
+        		algoidMsgTX.msg_param_array[1][i]=rand()&0x0000FFFF;
 
-        	for(i=0;i<algoidMsgTX.msg_param_count;i++)
-        		algoidMsgTX.msg_param_array[i]=rand()&0x0000FFFF;
+        	algoidMsgTX.msg_param[0]=PS_1;
+        	algoidMsgTX.msg_param_value[0]=((rand()<<16)+rand())&0x00FFFFFF;
 
+
+          	algoidMsgTX.msg_param[2]=PS_1;
+            	algoidMsgTX.msg_param_value[2]=((rand()<<16)+rand())&0x00FFFFFF;
+
+        	algoidMsgTX.msg_param[3]=PAS_1;
+        	algoidMsgTX.msg_param_count[3]=rand()&0x000000F;
+        	for(i=0;i<algoidMsgTX.msg_param_count[3];i++)
+        		algoidMsgTX.msg_param_array[3][i]=rand()&0x0000FFFF;
+
+
+        	algoidMsgTX.msg_param[4]=PAS_1;
+        	algoidMsgTX.msg_param_count[4]=rand()&0x000000F;
+        	for(i=0;i<algoidMsgTX.msg_param_count[4];i++)
+        		algoidMsgTX.msg_param_array[4][i]=rand()&0x0000FFFF;
 
         	nbChar = buildMqttMsg(PAYLOADTX, algoidMsgTX);
 
@@ -219,15 +240,17 @@ long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen){
 // Efface les champs d'un emplacemment donnï¿½ dans la pile
 // -------------------------------------------------------------------
 void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack){
-	unsigned char i;
+	unsigned char i, ptrParam;
 
 	destMsgStack[ptr].msg_id=0;
 	destMsgStack[ptr].msg_type=0;
 	destMsgStack[ptr].msg_type_value=0;
-	destMsgStack[ptr].msg_param=0;
-	destMsgStack[ptr].msg_param_count=0;
-	destMsgStack[ptr].msg_param_value=0;
-	for(i=0;i<100;i++) destMsgStack[ptr].msg_param_array[i]=0;
+	for(ptrParam=0;ptrParam<MAXPARAM;ptrParam++){
+		destMsgStack[ptr].msg_param[ptrParam]=0;
+		destMsgStack[ptr].msg_param_count[ptrParam]=0;
+		destMsgStack[ptr].msg_param_value[ptrParam]=0;
+		for(i=0;i<MAX_SHORT_ARRAY;i++) destMsgStack[ptr].msg_param_array[ptrParam][i]=0;
+	}
 	for(i=0;i<sizeof(destMsgStack[ptr].topicName);i++)destMsgStack[ptr].topicName[i]=0;
 }
 
@@ -237,54 +260,55 @@ void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack){
 // -------------------------------------------------------------------
 void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID *destMsgStack){
 
-	static unsigned char algoMsgStackPtr;
-	unsigned char algo_command[6][100];
+    unsigned short crc_calc=0;						// crc calculé
+    unsigned short crc_msg, i;					// crc message
+
+	unsigned char ptrParam, ptrInstruction =0;	// pointeur de param dans linstruction, pointeur d'instruction
+	static unsigned char algoMsgStackPtr;		// Pointeur du message algoid dans la pile
+	unsigned char algo_command[MAXINSTRUCTION][100];
 
     //--------- DECODAGE DU MESSAGE RECU
-    unsigned short countDataFrame;
+    unsigned short ptrMQTTbyte;					// Pointeur d'octet de la trame MQTT
+    unsigned short nbInstruction;				// pointeur sur l'instruction en cours
+    unsigned short instructionLenght;			// Taille de la trame MQTT
+    unsigned short ptrInstrByte;			    // Pointeur d'octet contenue dans l'instrruction
 
-    unsigned short indexCommand;
-
-    unsigned short dataLenght;
-    unsigned short dataCommandCount;
 
     printf("\n\n-------------------------------------");
     printf("\nNOUVEAU MESSAGE MQTT RECU");
     printf("\n-------------------------------------");
     //printf("\n Topic: %s", topicName);
 
-    unsigned short crc16=0;
-    unsigned short msg_crc, i;
+ // RECUPERE LE CRC DE LA TRAME (= 2 derniers octet)
+    crc_msg=(mqttMsg[msgLen-2]<<8)+(mqttMsg[msgLen-1]);
 
-    //printf("\n CRC ADD: ");
-    for(countDataFrame=0;countDataFrame < msgLen-2;countDataFrame++){
-    	crc16=update_crc_16(crc16, mqttMsg[countDataFrame]);
-    	//printf("%x ",mqttMsg[countDataFrame]);
+ // CALCULE DU CRC DE LA TRAME MQTT (Exclus 2 dernier byte (=crc))
+    for(ptrMQTTbyte=0;ptrMQTTbyte < msgLen-2;ptrMQTTbyte++){
+    	crc_calc=update_crc_16(crc_calc, mqttMsg[ptrMQTTbyte]);
+    	//printf("%x ",mqttMsg[ptrMQTTbyte]);
     }
 
-    msg_crc=(mqttMsg[msgLen-2]<<8)+(mqttMsg[msgLen-1]);
 
+// CONTROLE LA CORRESPONDANCE DU CRC MESSAGE ET CRC CALCULE
+    if(crc_calc==crc_msg){
+    	nbInstruction=0;
 
+      // printf("\n CRC MESSAGE: %d, CRC CALC: %d  \n",msg_crc ,crc16);
 
-    if(msg_crc==crc16){
-       indexCommand=0;
+       for(ptrMQTTbyte=0;ptrMQTTbyte < msgLen-2;){
 
-       printf("\n CRC MESSAGE: %d, CRC CALC: %d  \n",msg_crc ,crc16);
-
-       for(countDataFrame=0;countDataFrame < msgLen-2;){
-
-    	// Calcule de la longeur des donnï¿½ee de la commande
-    	    dataLenght=(mqttMsg[countDataFrame+1]<<8)+mqttMsg[countDataFrame+2];
+    	// Calcule de la longueur des donnees de l'instruction
+    	   instructionLenght=(mqttMsg[ptrMQTTbyte+1]<<8)+mqttMsg[ptrMQTTbyte+2];
 
         	printf("\n ALGOID MESSAGE: -> ");
 
-        	// Recuperation des messages contenu dans la trame.
-        	for(dataCommandCount=0;dataCommandCount < dataLenght+3;dataCommandCount++){
-        		algo_command[indexCommand][dataCommandCount] = mqttMsg[countDataFrame];
-        		printf(" %d ",algo_command[indexCommand][dataCommandCount]);
-        		countDataFrame++;
+        	// Recuperation de l'ensemble des instructions contenu contenue dans la trame MQTT
+        	for(ptrInstrByte=0;ptrInstrByte < instructionLenght+3;ptrInstrByte++){
+        		algo_command[nbInstruction][ptrInstrByte] = mqttMsg[ptrMQTTbyte];
+        		printf(" %x ",algo_command[nbInstruction][ptrInstrByte]);
+        		ptrMQTTbyte++;
         	}
-        	indexCommand++;
+        	nbInstruction++;
     }
 
        printf("\n");
@@ -296,35 +320,38 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
        else
     	   strcpy(destMsgStack[algoMsgStackPtr].topicName,topicName);
 
-		   for(indexCommand=0;indexCommand<3;indexCommand++){
-			   switch( algo_command[indexCommand][0]){
-					case T_MSGID : destMsgStack[algoMsgStackPtr].msg_id=algo_GetValue(algo_command[indexCommand], 1);
+		   for(ptrInstruction=0;ptrInstruction<nbInstruction;ptrInstruction++){
+			   switch(algo_command[ptrInstruction][0]){
+					case T_MSGID : destMsgStack[algoMsgStackPtr].msg_id=algo_GetValue(algo_command[ptrInstruction], 1);
 								  break;
 					case T_CMD	: destMsgStack[algoMsgStackPtr].msg_type=T_CMD;
-								destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
+								destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 								  break;
 					case T_MSGANS : destMsgStack[algoMsgStackPtr].msg_type=T_MSGANS;
-					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 									break;
 					case T_MSGACK : destMsgStack[algoMsgStackPtr].msg_type=T_MSGACK;
-					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 									break;
 					case T_EVENT : destMsgStack[algoMsgStackPtr].msg_type=T_EVENT;
-					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 								   break;
 					case T_ERROR : destMsgStack[algoMsgStackPtr].msg_type=T_ERROR;
-					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[indexCommand], 1);
+					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 								   break;
 					case T_IDNEG : break;
 
-					case PS_1 : destMsgStack[algoMsgStackPtr].msg_param=PS_1;
-								destMsgStack[algoMsgStackPtr].msg_param_value=algo_GetValue(algo_command[indexCommand], 4); break;
-
-					case PAS_1:	destMsgStack[algoMsgStackPtr].msg_param_count=((algo_command[indexCommand][1]<<8)+algo_command[indexCommand][2])/2;
-								for(i=0;i<destMsgStack[algoMsgStackPtr].msg_param_count;i++)
-									destMsgStack[algoMsgStackPtr].msg_param_array[i]=((algo_command[indexCommand][(i*2)+3])<<8)|(algo_command[indexCommand][(i*2)+4]) ;
+					case PS_1 : destMsgStack[algoMsgStackPtr].msg_param[ptrParam]=PS_1;
+								destMsgStack[algoMsgStackPtr].msg_param_value[ptrParam]=algo_GetValue(algo_command[ptrInstruction], 4);
+								ptrParam++;
 								break;
 
+					case PAS_1:	destMsgStack[algoMsgStackPtr].msg_param[ptrParam]=PAS_1;
+								destMsgStack[algoMsgStackPtr].msg_param_count[ptrParam]=((algo_command[ptrInstruction][1]<<8)+algo_command[ptrInstruction][2])/2;
+								for(i=0;i<destMsgStack[algoMsgStackPtr].msg_param_count[ptrParam];i++)
+									destMsgStack[algoMsgStackPtr].msg_param_array[ptrParam][i]=((algo_command[ptrInstruction][(i*2)+3])<<8)|(algo_command[ptrInstruction][(i*2)+4]) ;
+								ptrParam++;
+								break;
 					default : break;
 			   }
 		   }
@@ -332,17 +359,17 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
     }else{
     	int i;
     	AlgoidMessageReady=-1;
-    	printf("\n ***** MESSAGE ALGOID INVALID, CRC MESSAGE: %d, CRC CALC: %d ***** \n",msg_crc ,crc16);
-    	printf("\n ***** COUNT DATA W/O CRC: %d",countDataFrame);
+    	printf("\n ***** MESSAGE ALGOID INVALID, CRC MESSAGE: %d, CRC CALC: %d ***** \n",crc_msg ,crc_calc);
+    	printf("\n ***** COUNT DATA W/O CRC: %d",ptrMQTTbyte);
     	printf("\n ***** DATA WITH CRC:  ");
-    	for(i=0;i<countDataFrame+2;i++) printf("%x ",mqttMsg[i]);
+    	for(i=0;i<ptrMQTTbyte+2;i++) printf("%x ",mqttMsg[i]);
     }
 }
 
 
 
 // -------------------------------------------------------------------
-// Rï¿½cupï¿½re le premier message disponible dans la pile
+// Recupere le premier message disponible dans la pile
 // -------------------------------------------------------------------
 unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
 	unsigned char i;
@@ -419,7 +446,7 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 	// BUILD MQTT MESSAGE, mqtt destination frame, algoid message source
 	// -------------------------------------------------------------------
 	unsigned short buildMqttMsg(char *mqttMsgTX, ALGOID srcMsg){
-		unsigned char i;
+		unsigned char i, ptrParam;
 		unsigned short ptrChar;
 
 		int Mask=0xFF000000;
@@ -464,24 +491,26 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		mqttMsgTX[ptrChar++]=(byteCount&0x00FF);	//
 		for(i=0;i<byteCount;i++){
 			mqttMsgTX[ptrChar]=(srcMsg.msg_type_value&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1));
-			printf("\nTYPE -> %x", (srcMsg.msg_type_value&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1)));
+			//printf("\nTYPE -> %x", (srcMsg.msg_type_value&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1)));
 			ptrChar++;
 		}
 
 	// PARAM -----------------------------------------------
-				mqttMsgTX[ptrChar++]=srcMsg.msg_param;	// Assignation TYPE code message ID
+		//--
+		for(ptrParam=0;srcMsg.msg_param[ptrParam]!=0;ptrParam++){
+				mqttMsgTX[ptrChar++]=srcMsg.msg_param[ptrParam];	// Assignation TYPE code message ID
 
-				if((srcMsg.msg_param&0xF0) == 0xA0){
-					srcMsg.msg_param_value = ((rand()<<16)+rand())&0xFFFFFFFF;
-					printf("\nMEssage param: %x", srcMsg.msg_param_value);
+				if((srcMsg.msg_param[ptrParam]&0xF0) == 0xA0){
+					srcMsg.msg_param_value[ptrParam] = ((rand()<<16)+rand())&0xFFFFFFFF;
+					//printf("\nMEssage param: %x", srcMsg.msg_param_value[ptrParam]);
 
-					printf("\n BUILD TYPE VARIABLE");
+					//printf("\n BUILD TYPE VARIABLE");
 
 					// Calcule le nombre de bytes nécéssaire à la variable
 					byteCount=4;
 					Mask=0xFF000000;
 					for(i=0;i<4;i++){
-						if((srcMsg.msg_param_value&Mask)==0)	byteCount--;
+						if((srcMsg.msg_param_value[ptrParam]&Mask)==0)	byteCount--;
 						Mask=Mask>>8;
 					}
 					printf(" bytecound: %d", byteCount);
@@ -491,25 +520,25 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 									mqttMsgTX[ptrChar++]=(byteCount&0xFF00)>>8;	//
 									mqttMsgTX[ptrChar++]=(byteCount&0x00FF);	//
 									for(i=0;i<byteCount;i++){
-										mqttMsgTX[ptrChar]=(srcMsg.msg_param_value&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1));
-										printf("\nPARAM -> %x", (srcMsg.msg_param_value&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1)));
+										mqttMsgTX[ptrChar]=(srcMsg.msg_param_value[ptrParam]&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1));
+										//printf("\nPARAM -> %x", (srcMsg.msg_param_value[ptrParam]&(0x000000FF<<(8*(byteCount-i-1))))>>(8*(byteCount-i-1)));
 										ptrChar++;
 									}
 				}
 
-				if(((srcMsg.msg_param&0xF0) == 0xB0) ||((srcMsg.msg_param&0xF0) == 0xC0)) {
-					printf("\n BUILD TYPE ARRAY");
+				if(((srcMsg.msg_param[ptrParam]&0xF0) == 0xB0) ||((srcMsg.msg_param[ptrParam]&0xF0) == 0xC0)) {
+					//printf("\n BUILD TYPE ARRAY");
 
 					// MESSGE TYPE ARRY SHORT
 					// Assignement taille du tableau (constitué de INT=2octet)
-					mqttMsgTX[ptrChar++]=((srcMsg.msg_param_count*2)&0xFF00)>>8;	//
-					mqttMsgTX[ptrChar++]=((srcMsg.msg_param_count*2)&0x00FF);	//
+					mqttMsgTX[ptrChar++]=((srcMsg.msg_param_count[ptrParam]*2)&0xFF00)>>8;	//
+					mqttMsgTX[ptrChar++]=((srcMsg.msg_param_count[ptrParam]*2)&0x00FF);	//
 
-					for(i=0;i<srcMsg.msg_param_count;i++){
-						mqttMsgTX[ptrChar++]=(srcMsg.msg_param_array[i] & 0xFF00) >> 8;
-						mqttMsgTX[ptrChar++]=(srcMsg.msg_param_array[i] & 0x00FF);
+					for(i=0;i<srcMsg.msg_param_count[ptrParam];i++){
+						mqttMsgTX[ptrChar++]=(srcMsg.msg_param_array[ptrParam][i] & 0xFF00) >> 8;
+						mqttMsgTX[ptrChar++]=(srcMsg.msg_param_array[ptrParam][i] & 0x00FF);
 					}
 				}
-
+	}
 		return(ptrChar);
 	}
