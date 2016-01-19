@@ -140,5 +140,6 @@
 			<resource resourceType="PROJECT" workspacePath="/MQTT_app"/>
 		</configuration>
 	</storageModule>
-	<storageModule moduleId="org.eclipse.cdt.internal.ui.text.commentOwnerProjectMappings"/>
+	<storageModule moduleId="org.eclipse.cdt.internal.ui.text.commentOwnerProjectMappings">
+	</storageModule>
 </cproject>
