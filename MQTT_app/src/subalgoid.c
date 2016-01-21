@@ -15,18 +15,21 @@
 
 #define ADDRESS     "localhost:1883"
 //#define ADDRESS     "raphdev.ddns.net:1883"
-#define CLIENTID    "Algoid"
-#define TOPIC       "MQTT"
+
+#define TOPIC_NEGOCIATION  "ESMGR"				// Canal de négociation eduspider / Algoid
+													// Assignation via manager de "CLIENTID" et topic dedie RX et TX
 #define QOS         0
 #define TIMEOUT     10000L
-#define SENDERID	0x0A
+
+pthread_t th_algoid;
 
 MQTTClient_deliveryToken deliveredtoken, token;
 MQTTClient client;
 
-// Variable d'entrï¿½e/sortie vers algoid
-ALGOID algoidMsgRXStack[10], algoidMsgRX, algoidMsgTX;
-
+//char TOPIC_TX[10]= "ES2AL13";			// Topic initial, sera modife apres negociation
+char TOPIC_TX[10]= "AL2ES13";			// Topic initial, sera modife apres negociation
+char TOPIC_RX[10]= "AL2ES13";			// Topic initial, sera modife apres negociation
+char CLIENTID[20]= "13";		    	// Client ID is the last byte of IP address
 
 int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message); 	// Call-back message MQTT recu
 void delivered(void *context, MQTTClient_deliveryToken dt);		// Call-back message MQTT emis
@@ -43,16 +46,17 @@ unsigned short buildMqttMsg(char *mqttMsgTX, ALGOID srcMsg);
 // Retourne la donnï¿½e codï¿½e sur n bytes
 long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen);
 
-// Rï¿½cupï¿½re le premier message disponible dans la pile
-unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack);
-
-// Efface un champs donnï¿½ dans la pile de message
+// Efface un champs donnee dans la pile de message
 void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack);
+void algo_clearTX(void);
 
 // !!!!!!!!!!!   FONCTION DEBUG  A RETRAVAILLER...
-int algo_putMessage(char *topic, unsigned char *data, unsigned short lenght);
+int algo_putMessage(char *topic, char *data, unsigned short lenght);
 
+// Affichage de l'état de la pile séléctionnée
+void diplay_algoStack(ALGOID *msgStack);
 
+void SendQueueingTXmsg(ALGOID *msgStack);
 
 void error(char *msg) {
     perror(msg);
@@ -61,116 +65,56 @@ void error(char *msg) {
 
 
 // ------------------------------------------------------------------------------------
-// MAIN: Point d'entrï¿½e programme, initialisation connexion MQTT, souscription et publication
+// MAIN: Point d'entreee programme, initialisation connexion MQTT, souscription et publication
 // ------------------------------------------------------------------------------------
-int main(int argc, char* argv[])
-{
 
-	// Trame de test de type ALGOID a publier
-	unsigned char PAYLOADRX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
-	unsigned char PAYLOADTX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
+void *algoidTask (void * arg){
+	printf ("# Demarrage tache ALGOID: OK\n");
 
-	int ch;
-	int err;
-	unsigned char i,j, ptrParam;
+		// Trame de test de type ALGOID a publier
+		//char PAYLOADRX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
 
-	printf("\nMQQT-ALGO POC 19/01/2016\n");
-	printf("\nTentative de connexion au brocker MQTT...\n");
+		int err;
 
-	err=mqtt_init(ADDRESS, CLIENTID, msgarrvd);
+//		unsigned char nbChar;
 
-	if(!err){
-		printf("- reussite, tentative de souscription topic MQTT: ");
-		// Configuration souscription
-		if(!MQTTClient_subscribe(client, TOPIC, QOS))printf("OK\n");
-		else printf("ERREUR\n");
-	}else printf("Erreur de connexion au brocker !\n");
+		printf("\nMQQT-ALGO POC 19/01/2016\n");
+		printf("\nConnexion au brocker MQTT -> %s", ADDRESS);
 
-    do 
-    {
-    	// - Test: traitement du message algoid recu
-    	if(AlgoidMessageReady){
-    		if(AlgoidMessageReady==1){
-    			//printf("\n Main: MESSAGE MQTT ALGOID VALID RECU: %d \n", AlgoidMessageReady);
+		err=mqtt_init(ADDRESS, CLIENTID, msgarrvd);
 
-    			// Affichage des messages de la piles
-    		    for (i=0;i<10;i++)
-    		    {
-    		    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, cmd value: %d",i,algoidMsgRXStack[i].topicName, ((algoidMsgRXStack[i].msg_id&0xFF000000)>>24), algoidMsgRXStack[i].msg_id, algoidMsgRXStack[i].msg_type,
-    		    	    		    			algoidMsgRXStack[i].msg_type_value);
-    		    	for(ptrParam=0;algoidMsgRXStack[i].msg_param[ptrParam]!=0;ptrParam++){
+		if(!err){
+			printf("\nSouscription topic %s",TOPIC_RX);
+			// Configuration souscription
+			if(!MQTTClient_subscribe(client, TOPIC_RX, QOS))printf(": OK\n");
+			else printf("ERREUR\n");
+		}else printf("Erreur de connexion au brocker !\n");
 
-    		    	 if(algoidMsgRXStack[i].msg_param[ptrParam]==0xa1)
+		unsigned char tlengt;
+		tlengt=sizeof(TOPIC_RX);
+		//TOPIC_RX+="ss";
 
-    		    		 printf("\n        value: %d",algoidMsgRXStack[i].msg_param_value[ptrParam]);
-    		    	 if(algoidMsgRXStack[i].msg_param[ptrParam]==0xb1){
-    		    		 printf("\n        array: ");
-    		    		 for(j=0;j<algoidMsgRXStack[i].msg_param_count[ptrParam];j++) printf("%d ", algoidMsgRXStack[i].msg_param_array[ptrParam][j]);
-    		    	 }
-    		    	}
-    		    	printf("\n");
-    		    }
-    		    printf("\n");
-    		}
-    		else printf("\n Main: MESSAGE MQTT NON-ALGOID RECU \n");
+		printf("topix tx: %s",TOPIC_RX);
+		// BOUCLE PRINCIPALE
+	    while(!EndOfApp)
+	    {
 
-    		AlgoidMessageReady=0;
-    	}
-    	// -----------------------
+	    	SendQueueingTXmsg(algoidMsgTXStack);
+	    	sleep(5);
+	    }
+	    // FIN BOUUCLE PRINCIPAL
 
-        ch = getchar();
-        if(ch=='d'){
-        	if(algo_getMessage(algoidMsgRX, algoidMsgRXStack))printf("\nOK\n");
-        	else printf("\nPAS DE MESSAGE\n");
-        }
+	    MQTTClient_disconnect(client, 10000);
+	    MQTTClient_destroy(&client);
 
-        if(ch=='p'){
-        	int result;
-        	unsigned char nbChar;
+	    return 0;
+  usleep(5000);
 
-        	algoidMsgTX.msg_id = rand()&0x00FFFFFF;
-        	algoidMsgTX.msg_id |= SENDERID<<24;
+  printf( "# ARRET tache ALGOID\n");
 
-        	algoidMsgTX.msg_type=T_CMD;
-        	algoidMsgTX.msg_type_value=0x03;
-
-        	algoidMsgTX.msg_param[1]=PAS_1;
-        	algoidMsgTX.msg_param_count[1]=rand()&0x000000F;
-        	for(i=0;i<algoidMsgTX.msg_param_count[1];i++)
-        		algoidMsgTX.msg_param_array[1][i]=rand()&0x0000FFFF;
-
-        	algoidMsgTX.msg_param[0]=PS_1;
-        	algoidMsgTX.msg_param_value[0]=((rand()<<16)+rand())&0x00FFFFFF;
-
-
-          	algoidMsgTX.msg_param[2]=PS_1;
-            	algoidMsgTX.msg_param_value[2]=((rand()<<16)+rand())&0x00FFFFFF;
-
-        	algoidMsgTX.msg_param[3]=PAS_1;
-        	algoidMsgTX.msg_param_count[3]=rand()&0x000000F;
-        	for(i=0;i<algoidMsgTX.msg_param_count[3];i++)
-        		algoidMsgTX.msg_param_array[3][i]=rand()&0x0000FFFF;
-
-
-        	algoidMsgTX.msg_param[4]=PAS_1;
-        	algoidMsgTX.msg_param_count[4]=rand()&0x000000F;
-        	for(i=0;i<algoidMsgTX.msg_param_count[4];i++)
-        		algoidMsgTX.msg_param_array[4][i]=rand()&0x0000FFFF;
-
-        	nbChar = buildMqttMsg(PAYLOADTX, algoidMsgTX);
-
-        	result=algo_putMessage("MQTT",PAYLOADTX, nbChar);
-
-        	if(!result) printf("\n Message with delivery token %d delivered\n", token);
-        }
-    } while(ch != 'Q' && ch != 'q');
-
-    MQTTClient_disconnect(client, 10000);
-    MQTTClient_destroy(&client);
-
-    return 0;
+  usleep(10000);
+  pthread_exit (0);
 }
-
 
 // -------------------------------------------------------------------
 // Fonction Call-back de retour de token MQTT pour contrï¿½le
@@ -184,7 +128,7 @@ void delivered(void *context, MQTTClient_deliveryToken dt)
 
 
 // -------------------------------------------------------------------
-// Fonction Call-Back rï¿½cï¿½ption d'un message MQTT
+// Fonction Call-Back reception d'un message MQTT
 // -------------------------------------------------------------------
 int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message)
 {
@@ -274,10 +218,7 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
     unsigned short ptrInstrByte;			    // Pointeur d'octet contenue dans l'instrruction
 
 
-    printf("\n\n-------------------------------------");
-    printf("\nNOUVEAU MESSAGE MQTT RECU");
-    printf("\n-------------------------------------");
-    //printf("\n Topic: %s", topicName);
+ //printf("\n Topic: %s", topicName);
 
  // RECUPERE LE CRC DE LA TRAME (= 2 derniers octet)
     crc_msg=(mqttMsg[msgLen-2]<<8)+(mqttMsg[msgLen-1]);
@@ -292,6 +233,10 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 // CONTROLE LA CORRESPONDANCE DU CRC MESSAGE ET CRC CALCULE
     if(crc_calc==crc_msg){
     	nbInstruction=0;
+
+        printf("\n\n -------------------------------------");
+        printf("\n NOUVEAU MESSAGE ALGOID RECU");
+        printf("\n -------------------------------------");
 
       // printf("\n CRC MESSAGE: %d, CRC CALC: %d  \n",msg_crc ,crc16);
 
@@ -346,7 +291,7 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 								ptrParam++;
 								break;
 
-					case PAS_1:	destMsgStack[algoMsgStackPtr].msg_param[ptrParam]=PAS_1;
+					case PSA_1:	destMsgStack[algoMsgStackPtr].msg_param[ptrParam]=PSA_1;
 								destMsgStack[algoMsgStackPtr].msg_param_count[ptrParam]=((algo_command[ptrInstruction][1]<<8)+algo_command[ptrInstruction][2])/2;
 								for(i=0;i<destMsgStack[algoMsgStackPtr].msg_param_count[ptrParam];i++)
 									destMsgStack[algoMsgStackPtr].msg_param_array[ptrParam][i]=((algo_command[ptrInstruction][(i*2)+3])<<8)|(algo_command[ptrInstruction][(i*2)+4]) ;
@@ -355,14 +300,24 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 					default : break;
 			   }
 		   }
-		   AlgoidMessageReady=1;
+
+/*
+		   // Efface le message recu si propre expediteur
+		   if((destMsgStack[algoMsgStackPtr].msg_id & 0xFF000000) >> 24 != MYSENDERID){
+			   AlgoidMessageReady=destMsgStack[algoMsgStackPtr].msg_id;			// Retroune le ID du message recu
+		   }
+		   else algo_clearStack(algoMsgStackPtr, destMsgStack);
+*/
     }else{
-    	int i;
-    	AlgoidMessageReady=-1;
-    	printf("\n ***** MESSAGE ALGOID INVALID, CRC MESSAGE: %d, CRC CALC: %d ***** \n",crc_msg ,crc_calc);
-    	printf("\n ***** COUNT DATA W/O CRC: %d",ptrMQTTbyte);
+
+    	printf("\n\n ----------------------------------------------------------------");
+    	printf("\n ! MESSAGE ALGOID INVALID, CRC MESSAGE: %d, CRC CALC: %d ! \n",crc_msg ,crc_calc);
+    	printf("\n ***** NUMBER OF DATA W/O CRC: %d",ptrMQTTbyte);
     	printf("\n ***** DATA WITH CRC:  ");
     	for(i=0;i<ptrMQTTbyte+2;i++) printf("%x ",mqttMsg[i]);
+    	printf("\n ----------------------------------------------------------------");
+
+    	//AlgoidMessageReady=-1;
     }
 }
 
@@ -373,18 +328,42 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 // -------------------------------------------------------------------
 unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
 	unsigned char i;
+
+	// Récuperation du message de la pile si disponible
 	if(srcMsgStack[0].msg_id != 0){
 		destMsg=srcMsgStack[0];
 
 		for(i=0;i<9;i++){
 			srcMsgStack[i]=srcMsgStack[i+1];
 		}
-		algo_clearStack(9, srcMsgStack);
+		algo_clearStack(9, srcMsgStack);				// Liberation d'un espace dans la pile
 		return 1;
 	}
 	else{
 		return 0;
 	}
+}
+
+// -------------------------------------------------------------------
+// Charge le  message dans la pile d'envoie
+// -------------------------------------------------------------------
+unsigned char algo_setMessage(ALGOID srcMsg, ALGOID *destMsgStack){
+	unsigned char ptrAlgoMsgTXstack;
+
+	// Recherche d'un emplacement libre dans la pile d'envoie
+	for(ptrAlgoMsgTXstack=0;destMsgStack[ptrAlgoMsgTXstack].msg_id != 0 && ptrAlgoMsgTXstack<10;ptrAlgoMsgTXstack++);
+
+	// Tentative de mise du message dans la pile
+    if(ptrAlgoMsgTXstack>=10){
+    	// Pile pleine
+    	printf("\n!!! ALGO STACK TX OVERFLOW !!!");
+    	return (0);
+    }
+    else{
+    	// Message mis en file d'attente
+    	destMsgStack[ptrAlgoMsgTXstack] = srcMsg;
+    	return (1);
+    }
 }
 
 
@@ -418,7 +397,7 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 	// -------------------------------------------------------------------
 	// !!!!!!!!!!!   FONCTION DEBUG  A RETRAVAILLER...
 	// -------------------------------------------------------------------
-	int algo_putMessage(char *topic, unsigned char *data, unsigned short lenght){
+	int algo_putMessage(char *topic, char *data, unsigned short lenght){
     	short j;
     	int rc;
     	unsigned short crc16=0;
@@ -432,10 +411,10 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		data[lenght++]=(crc16&0xFF00)>>8;
 		data[lenght++]=(crc16&0x00FF);
 
-		unsigned char i;
 		// Publication du message
-		printf("\n PUBLISHING: ");
-		for(i=0;i<lenght; i++) printf(" %x", data[i]);
+		//printf("\n PUBLICATION: ");
+		//for(i=0;i<lenght; i++) printf(" %x", data[i]);
+
 		MQTTClient_publish(client, topic, lenght, data, QOS, 0, &token);
 		rc = MQTTClient_waitForCompletion(client, token, TIMEOUT);
 
@@ -453,7 +432,7 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		unsigned short byteCount;
 
 // ID -----------------------------------------------
-		printf("\nMEssage ID: %x", srcMsg.msg_id);
+		//printf("\nMEssage ID: %x", srcMsg.msg_id);
 
 		// Calcule le nombre de bytes nécéssaire à la variable
 		byteCount=4;
@@ -513,7 +492,6 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 						if((srcMsg.msg_param_value[ptrParam]&Mask)==0)	byteCount--;
 						Mask=Mask>>8;
 					}
-					printf(" bytecound: %d", byteCount);
 
 					// MESSGE TYPE
 
@@ -541,4 +519,91 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 				}
 	}
 		return(ptrChar);
+	}
+
+
+// -------------------------------------------------------------------
+// DISPLAY_ALGOSTACK, affichage de la pile de message ALGOID
+// -------------------------------------------------------------------
+	void diplay_algoStack(ALGOID *msgStack){
+		unsigned char i, j;
+		unsigned char ptrParam;
+
+	    for (i=0;i<10;i++)
+	    {
+	    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, cmd value: %d",i,msgStack[i].topicName, ((msgStack[i].msg_id&0xFF000000)>>24), msgStack[i].msg_id, msgStack[i].msg_type,
+	    	    		    			msgStack[i].msg_type_value);
+	    	for(ptrParam=0;msgStack[i].msg_param[ptrParam]!=0;ptrParam++){
+
+	    	 if(msgStack[i].msg_param[ptrParam]==PS_1)
+
+	    		 printf("\n        value: %d",msgStack[i].msg_param_value[ptrParam]);
+	    	 if(msgStack[i].msg_param[ptrParam]==PSA_1){
+	    		 printf("\n        array: ");
+	    		 for(j=0;j<msgStack[i].msg_param_count[ptrParam];j++) printf("%d ", msgStack[i].msg_param_array[ptrParam][j]);
+	    	 }
+	    	}
+	    	printf("\n");
+	    }
+	    printf("\n");
+	}
+
+	// -------------------------------------------------------------------
+	// EFFACE LE BUFFER ALGOID TX
+	// -------------------------------------------------------------------
+	void algo_clearTX(void){
+		unsigned char i, ptrParam;
+
+		algoidMsgTX.msg_id=0;
+		algoidMsgTX.msg_type=0;
+		algoidMsgTX.msg_type_value=0;
+		for(ptrParam=0;ptrParam<MAXPARAM;ptrParam++){
+			algoidMsgTX.msg_param[ptrParam]=0;
+			algoidMsgTX.msg_param_count[ptrParam]=0;
+			algoidMsgTX.msg_param_value[ptrParam]=0;
+			for(i=0;i<MAX_SHORT_ARRAY;i++) algoidMsgTX.msg_param_array[ptrParam][i]=0;
+		}
+		for(i=0;i<sizeof(algoidMsgTX.topicName);i++)algoidMsgTX.topicName[i]=0;
+	}
+
+	// -------------------------------------------------------------------
+	// Envoie le message aalgoid en file d'attente
+	// -------------------------------------------------------------------
+	void SendQueueingTXmsg(ALGOID *msgStack){
+    	int result;
+    	unsigned char nbChar, i;
+    	char PAYLOADTX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
+
+    	if(msgStack[0].msg_id != 0){
+    		// Construction de la trame MQTT avec le message ALGOID
+    		// Récupère le nombre d'octet MQTT a envoyer
+    		nbChar = buildMqttMsg(PAYLOADTX, msgStack[0]);
+    		algo_clearTX();
+
+    		// Envoie du message sur TOPIC_TX DU BROCKER
+    		result=algo_putMessage(TOPIC_TX,PAYLOADTX, nbChar);
+    		if(result)
+    			printf("\n!!! ERREUR:  MESSAGE MQTT NON ENVOYE !!!");			// Erreur de transmission
+    		else {
+    			for(i=0;i<9;i++){												// Descente des message dans la pile
+    				msgStack[i]=msgStack[i+1];
+    			}
+    			algo_clearStack(9, msgStack);							// Liberation d'un espace dans la pile
+    		}
+    	}
+	}
+
+	// ---------------------------------------------------------------------------
+	// CREATION THREAD UART
+	// ---------------------------------------------------------------------------
+	int createAlgoidTask(void)
+	{
+		return (pthread_create (&th_algoid, NULL, algoidTask, NULL));
+	}
+
+	// ---------------------------------------------------------------------------
+	// DESTRUCTION THREAD UART
+	// ---------------------------------------------------------------------------
+	int killAlgoidTask(void){
+		return (pthread_cancel(&th_algoid));
 	}

@@ -8,6 +8,8 @@
 #ifndef SAMPLES_SUBALGOID_H_
 #define SAMPLES_SUBALGOID_H_
 
+#define MYSENDERID	0x0B
+
 #define MAXMQTTBYTE	1000			// Nombre maximum d'octet par trame MQTT
 #define MAXINSTRUCTION	10		    // Nombre maximum de parametres pouvant etre recu par commande
 #define MAXINSTRUCTIONBYTE	120		// Nombre maximum d'octet par instruction
@@ -19,16 +21,16 @@
 #define T_MSGID	 0x01
 #define T_CMD	 0x02
 #define T_MSGANS 0x03
-#define T_MSGACK 0x04
-#define T_EVENT	 0x05
-#define T_ERROR  0x06
-#define T_IDNEG	 0x07
+#define T_EVENT	 0x04
+#define T_IDNEG	 0x05
+#define T_ERROR  0xF1
+#define T_MSGACK 0xF2
 
-// SCALAR PARAMETER OF ALGOID MESSAGE
+// SCALAR PARAMETER OF ALGOID MESSAGE (CHAR, SHORT ou INT)
 #define PS_1   	  0xa1
 
-// ARRAY PARAMETER OF ALGOID MESSAGE
-#define PAS_1	  0xb1
+// SHORT ARRAY PARAMETER OF ALGOID MESSAGE
+#define PSA_1	  0xb1
 
 // DEFINITION DE LA STRUCTURE DU MESSAGE ALGOID
 typedef struct{
@@ -42,6 +44,18 @@ typedef struct{
 	char topicName[25];					 // MQTT Topic name
 } ALGOID;
 
-char AlgoidMessageReady;
+//unsigned int AlgoidMessageReady;
+
+unsigned char EndOfApp;
+
+
+// Variable d'entree/sortie vers algoid
+ALGOID algoidMsgRXStack[10],algoidMsgTXStack[10], algoidMsgRX, algoidMsgTX;
+
+// recupere le premier message disponible dans la pile
+unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack);
+unsigned char algo_setMessage(ALGOID srcMsg, ALGOID *destMsgStack);
+
+int createAlgoidTask(void);
 
 #endif /* SAMPLES_SUBALGOID_H_ */
