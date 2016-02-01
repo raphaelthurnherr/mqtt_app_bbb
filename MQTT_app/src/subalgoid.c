@@ -15,9 +15,7 @@
 
 #define ADDRESS     "localhost:1883"
 //#define ADDRESS     "raphdev.ddns.net:1883"
-
-#define TOPIC_NEGOCIATION  "ESMGR"				// Canal de négociation eduspider / Algoid
-													// Assignation via manager de "CLIENTID" et topic dedie RX et TX
+											// Assignation via manager de "CLIENTID" et topic dedie RX et TX
 #define QOS         0
 #define TIMEOUT     10000L
 
@@ -26,10 +24,10 @@ pthread_t th_algoid;
 MQTTClient_deliveryToken deliveredtoken, token;
 MQTTClient client;
 
-//char TOPIC_TX[10]= "ES2AL13";			// Topic initial, sera modife apres negociation
-char TOPIC_TX[10]= "AL2ES13";			// Topic initial, sera modife apres negociation
-char TOPIC_RX[10]= "AL2ES13";			// Topic initial, sera modife apres negociation
-char CLIENTID[20]= "13";		    	// Client ID is the last byte of IP address
+char TOPIC_TX[25]= TOPIC_MGR;			// Topic initial, sera modife apres negociation
+char TOPIC_RX[25]= TOPIC_MGR;			// Topic initial, sera modife apres negociatio
+//char TOPIC_RX[25]= "MQ2ES12";			// Topic initial, sera modife apres negociatio
+char CLIENTID[20]= "ES12";		    	// MQTT Client ID is ES+"the last byte of IP address"
 
 int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message); 	// Call-back message MQTT recu
 void delivered(void *context, MQTTClient_deliveryToken dt);		// Call-back message MQTT emis
@@ -47,16 +45,25 @@ unsigned short buildMqttMsg(char *mqttMsgTX, ALGOID srcMsg);
 long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen);
 
 // Efface un champs donnee dans la pile de message
-void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack);
-void algo_clearTX(void);
+void algo_clearMessage(ALGOID algMsg);
 
-// !!!!!!!!!!!   FONCTION DEBUG  A RETRAVAILLER...
+// Envoie le messageau brocker MQTT
 int algo_putMessage(char *topic, char *data, unsigned short lenght);
 
 // Affichage de l'état de la pile séléctionnée
 void diplay_algoStack(ALGOID *msgStack);
 
-void SendQueueingTXmsg(ALGOID *msgStack);
+// Envoie le prochain message algoid de la pile si disponible
+char SendQueueingTXmsg(ALGOID *msgStack);
+
+// Défini les cannaux sur lesquels doit se connecter Eduspider pour l'emission
+// des message et la reception
+char algoSetTXChannel(char * topicName);
+char algoAddRXChannel(char * topicName);
+char algoRemoveRXChannel(char * topicName);
+
+// Traitement de la commande de négociation avec le manager
+char processNegociation(ALGOID message);
 
 void error(char *msg) {
     perror(msg);
@@ -70,13 +77,9 @@ void error(char *msg) {
 
 void *algoidTask (void * arg){
 	printf ("# Demarrage tache ALGOID: OK\n");
-
-		// Trame de test de type ALGOID a publier
-		//char PAYLOADRX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
-
+	char prtFindNegocMsg=0;
+	char j;
 		int err;
-
-//		unsigned char nbChar;
 
 		printf("\nMQQT-ALGO POC 19/01/2016\n");
 		printf("\nConnexion au brocker MQTT -> %s", ADDRESS);
@@ -84,25 +87,52 @@ void *algoidTask (void * arg){
 		err=mqtt_init(ADDRESS, CLIENTID, msgarrvd);
 
 		if(!err){
-			printf("\nSouscription topic %s",TOPIC_RX);
-			// Configuration souscription
-			if(!MQTTClient_subscribe(client, TOPIC_RX, QOS))printf(": OK\n");
-			else printf("ERREUR\n");
-		}else printf("Erreur de connexion au brocker !\n");
 
-		unsigned char tlengt;
-		tlengt=sizeof(TOPIC_RX);
-		//TOPIC_RX+="ss";
+			algoSetTXChannel(TOPIC_MGR);
+			algoAddRXChannel(TOPIC_MGR);
+		}else
+			printf(": Erreur de connexion au brocker, code erreur: %d\n", err);
 
-		printf("topix tx: %s",TOPIC_RX);
-		// BOUCLE PRINCIPALE
+		sleep(10);
+
+	 													// duty cycle is 50% for ePWM0A , 25% for ePWM0B;
+
+// BOUCLE PRINCIPALE
 	    while(!EndOfApp)
 	    {
+	    	ALGOID algoidNegociationRX;
 
+	    	// Recherche d'éventuels message de negociation ou en provenance du manager
+	    	for(prtFindNegocMsg=0;prtFindNegocMsg<RXTXSTACK_SIZE;prtFindNegocMsg++){
+				if((algoidMsgRXStack[prtFindNegocMsg].msg_type==T_NEGOC) || (!strcmp(algoidMsgRXStack[prtFindNegocMsg].topic, TOPIC_MGR))){
+
+					// Récupère le message de la pile
+					algoidNegociationRX=algoidMsgRXStack[prtFindNegocMsg];
+
+					// Liberation de l'espace dans la pile
+					for(j=prtFindNegocMsg;j<RXTXSTACK_SIZE-1;j++)
+										algoidMsgRXStack[j]=algoidMsgRXStack[j+1];
+
+					// Verification que le message est bien destiné à ce spider ([0] = destinataire du message)
+					if(!strcmp(algoidNegociationRX.msg_string_array[0], CLIENTID)){
+						printf("\n MESSAGE MESSAGE NEGOCIATION EN TRAITEMENT \n");
+						processNegociation(algoidNegociationRX); // Traitement du message me concernant
+					}
+					else
+					{
+						printf("\n MESSAGE NEGOCIATION NON TRAITE, MAUVAIS DESTINATAIRE \n");
+					}
+					//algo_clearMessage(algoidNegociationRX); // Efface le message recu
+
+				}
+	    	}
+
+	    	// Envoie le prochaine message en attente dans la pile
 	    	SendQueueingTXmsg(algoidMsgTXStack);
-	    	sleep(5);
+
+	    	sleep(3);
 	    }
-	    // FIN BOUUCLE PRINCIPAL
+ // FIN BOUUCLE PRINCIPAL
 
 	    MQTTClient_disconnect(client, 10000);
 	    MQTTClient_destroy(&client);
@@ -157,7 +187,7 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
 void connlost(void *context, char *cause)
 {
     printf("\nConnection lost\n");
-    printf("     cause: %s\n", cause);
+    printf("              cause: %s\n", cause);
 }
 
 
@@ -178,26 +208,6 @@ long algo_GetValue(unsigned char *MsgVal, unsigned char byteLen){
 	}
 	return(myVal);
 }
-
-
-// -------------------------------------------------------------------
-// Efface les champs d'un emplacemment donnï¿½ dans la pile
-// -------------------------------------------------------------------
-void algo_clearStack(unsigned char ptr, ALGOID *destMsgStack){
-	unsigned char i, ptrParam;
-
-	destMsgStack[ptr].msg_id=0;
-	destMsgStack[ptr].msg_type=0;
-	destMsgStack[ptr].msg_type_value=0;
-	for(ptrParam=0;ptrParam<MAXPARAM;ptrParam++){
-		destMsgStack[ptr].msg_param[ptrParam]=0;
-		destMsgStack[ptr].msg_param_count[ptrParam]=0;
-		destMsgStack[ptr].msg_param_value[ptrParam]=0;
-		for(i=0;i<MAX_SHORT_ARRAY;i++) destMsgStack[ptr].msg_param_array[ptrParam][i]=0;
-	}
-	for(i=0;i<sizeof(destMsgStack[ptr].topicName);i++)destMsgStack[ptr].topicName[i]=0;
-}
-
 
 // -------------------------------------------------------------------
 // Construction message algoid, controle CRC algo message, empilage des messages dans variable type ALGOID
@@ -258,12 +268,13 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 
        printf("\n");
        // Recherche un emplacement libre dans la pile de messages
-       for(algoMsgStackPtr=0;(destMsgStack[algoMsgStackPtr].msg_id!=0) && algoMsgStackPtr<10;algoMsgStackPtr++);
+       for(algoMsgStackPtr=0;(destMsgStack[algoMsgStackPtr].msg_id!=0) && algoMsgStackPtr<RXTXSTACK_SIZE;algoMsgStackPtr++);
 
-       if(algoMsgStackPtr>=10)
+       if(algoMsgStackPtr>=RXTXSTACK_SIZE){
     	   printf("\n!!! ALGO MESSAGES STACK OVERFLOW !!!");
-       else
-    	   strcpy(destMsgStack[algoMsgStackPtr].topicName,topicName);
+       }
+       else{
+    	   strcpy(destMsgStack[algoMsgStackPtr].topic,topicName);
 
 		   for(ptrInstruction=0;ptrInstruction<nbInstruction;ptrInstruction++){
 			   switch(algo_command[ptrInstruction][0]){
@@ -276,15 +287,17 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 									break;
 					case T_MSGACK : destMsgStack[algoMsgStackPtr].msg_type=T_MSGACK;
-					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
+									destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 									break;
 					case T_EVENT : destMsgStack[algoMsgStackPtr].msg_type=T_EVENT;
-					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
+									destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 								   break;
 					case T_ERROR : destMsgStack[algoMsgStackPtr].msg_type=T_ERROR;
 					destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
 								   break;
-					case T_IDNEG : break;
+					case T_NEGOC :  destMsgStack[algoMsgStackPtr].msg_type=T_NEGOC;
+									destMsgStack[algoMsgStackPtr].msg_type_value=algo_GetValue(algo_command[ptrInstruction], 1);
+									break;
 
 					case PS_1 : destMsgStack[algoMsgStackPtr].msg_param[ptrParam]=PS_1;
 								destMsgStack[algoMsgStackPtr].msg_param_value[ptrParam]=algo_GetValue(algo_command[ptrInstruction], 4);
@@ -297,17 +310,17 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 									destMsgStack[algoMsgStackPtr].msg_param_array[ptrParam][i]=((algo_command[ptrInstruction][(i*2)+3])<<8)|(algo_command[ptrInstruction][(i*2)+4]) ;
 								ptrParam++;
 								break;
+
+					case PCA_1:	destMsgStack[algoMsgStackPtr].msg_param[ptrParam]=PCA_1;
+								destMsgStack[algoMsgStackPtr].msg_param_count[ptrParam]=((algo_command[ptrInstruction][1]<<8)+algo_command[ptrInstruction][2]);
+								for(i=0;i<destMsgStack[algoMsgStackPtr].msg_param_count[ptrParam];i++)
+									destMsgStack[algoMsgStackPtr].msg_string_array[ptrParam][i]=algo_command[ptrInstruction][i+3];
+								ptrParam++;
+								break;
 					default : break;
 			   }
 		   }
-
-/*
-		   // Efface le message recu si propre expediteur
-		   if((destMsgStack[algoMsgStackPtr].msg_id & 0xFF000000) >> 24 != MYSENDERID){
-			   AlgoidMessageReady=destMsgStack[algoMsgStackPtr].msg_id;			// Retroune le ID du message recu
-		   }
-		   else algo_clearStack(algoMsgStackPtr, destMsgStack);
-*/
+       }
     }else{
 
     	printf("\n\n ----------------------------------------------------------------");
@@ -316,8 +329,6 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
     	printf("\n ***** DATA WITH CRC:  ");
     	for(i=0;i<ptrMQTTbyte+2;i++) printf("%x ",mqttMsg[i]);
     	printf("\n ----------------------------------------------------------------");
-
-    	//AlgoidMessageReady=-1;
     }
 }
 
@@ -326,17 +337,17 @@ void processMqttMsg(char *mqttMsg, unsigned int msgLen, char *topicName, ALGOID 
 // -------------------------------------------------------------------
 // Recupere le premier message disponible dans la pile
 // -------------------------------------------------------------------
-unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
+char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
 	unsigned char i;
 
 	// Récuperation du message de la pile si disponible
 	if(srcMsgStack[0].msg_id != 0){
 		destMsg=srcMsgStack[0];
-
-		for(i=0;i<9;i++){
+		// Descend la pile de message
+		for(i=0;i<RXTXSTACK_SIZE-1;i++){
 			srcMsgStack[i]=srcMsgStack[i+1];
 		}
-		algo_clearStack(9, srcMsgStack);				// Liberation d'un espace dans la pile
+		algo_clearMessage(srcMsgStack[RXTXSTACK_SIZE-1]);				// Liberation d'un espace dans la pile
 		return 1;
 	}
 	else{
@@ -347,23 +358,34 @@ unsigned char algo_getMessage(ALGOID destMsg, ALGOID *srcMsgStack){
 // -------------------------------------------------------------------
 // Charge le  message dans la pile d'envoie
 // -------------------------------------------------------------------
-unsigned char algo_setMessage(ALGOID srcMsg, ALGOID *destMsgStack){
+char algo_setMessage(ALGOID srcMsg, ALGOID *destMsgStack){
 	unsigned char ptrAlgoMsgTXstack;
 
-	// Recherche d'un emplacement libre dans la pile d'envoie
-	for(ptrAlgoMsgTXstack=0;destMsgStack[ptrAlgoMsgTXstack].msg_id != 0 && ptrAlgoMsgTXstack<10;ptrAlgoMsgTXstack++);
-
-	// Tentative de mise du message dans la pile
-    if(ptrAlgoMsgTXstack>=10){
-    	// Pile pleine
-    	printf("\n!!! ALGO STACK TX OVERFLOW !!!");
-    	return (0);
-    }
-    else{
-    	// Message mis en file d'attente
-    	destMsgStack[ptrAlgoMsgTXstack] = srcMsg;
-    	return (1);
-    }
+	// Contrôle la présence d'un topic de destination
+	if(strlen(srcMsg.topic)){
+		if(!srcMsg.msg_id) {
+			srcMsg.msg_id |= HOSTSENDERID<<24;
+			printf(" - ATTENTION, MESSAGE ID MANQUANT. ENVOYE AVEC ID GENERIQUE");
+		}
+		// Recherche d'un emplacement libre dans la pile d'envoie
+			for(ptrAlgoMsgTXstack=0;destMsgStack[ptrAlgoMsgTXstack].msg_id != 0 && ptrAlgoMsgTXstack<RXTXSTACK_SIZE;ptrAlgoMsgTXstack++);
+			// Tentative de mise du message dans la pile
+		    if(ptrAlgoMsgTXstack>=RXTXSTACK_SIZE){
+		    	// Pile pleine
+		    	printf("\n!!! ALGO STACK TX OVERFLOW !!!");
+		    	return (-2);
+		    }
+		    else{
+		    	// Message mis en file d'attente
+		    	destMsgStack[ptrAlgoMsgTXstack] = srcMsg;
+		    	return (1);
+		    }
+	}
+else
+	{
+		printf("\nERREUR, MESSAGE EN FILE MQTT NON ENVOYE : TOPIC MANQUANT");			// Erreur de transmission
+		return -1;
+	}
 }
 
 
@@ -389,7 +411,6 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		// Tentative de connexion au broker mqtt
 		if ((rc = MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS)
 		{
-			printf("Failed to connect to MQTT brocker, return code %d\n", rc);
 			return(rc);
 		}else return 0;
 	}
@@ -475,11 +496,12 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		}
 
 	// PARAM -----------------------------------------------
-		//--
 		for(ptrParam=0;srcMsg.msg_param[ptrParam]!=0;ptrParam++){
 				mqttMsgTX[ptrChar++]=srcMsg.msg_param[ptrParam];	// Assignation TYPE code message ID
 
-				if((srcMsg.msg_param[ptrParam]&0xF0) == 0xA0){
+				// MESSAGE DE TYPE SCALAIRE
+				//
+				if(srcMsg.msg_param[ptrParam]==PS_1){
 					srcMsg.msg_param_value[ptrParam] = ((rand()<<16)+rand())&0xFFFFFFFF;
 					//printf("\nMEssage param: %x", srcMsg.msg_param_value[ptrParam]);
 
@@ -504,7 +526,9 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 									}
 				}
 
-				if(((srcMsg.msg_param[ptrParam]&0xF0) == 0xB0) ||((srcMsg.msg_param[ptrParam]&0xF0) == 0xC0)) {
+				// MESSAGE DE TYPE SHORT ARRAY
+				//
+				if(srcMsg.msg_param[ptrParam]== PSA_1) {
 					//printf("\n BUILD TYPE ARRAY");
 
 					// MESSGE TYPE ARRY SHORT
@@ -515,6 +539,21 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 					for(i=0;i<srcMsg.msg_param_count[ptrParam];i++){
 						mqttMsgTX[ptrChar++]=(srcMsg.msg_param_array[ptrParam][i] & 0xFF00) >> 8;
 						mqttMsgTX[ptrChar++]=(srcMsg.msg_param_array[ptrParam][i] & 0x00FF);
+					}
+				}
+
+				// MESSAGE DE TYPE STRING ARRAY
+				//
+				if(srcMsg.msg_param[ptrParam]==PCA_1) {
+					//printf("\n BUILD TYPE STRING ARRAY");
+
+					// MESSGE TYPE STRING ARRAY
+					// Assignement taille du tableau (constitué de INT=2octet)
+					mqttMsgTX[ptrChar++]=((srcMsg.msg_param_count[ptrParam])&0xFF00)>>8;	//
+					mqttMsgTX[ptrChar++]=((srcMsg.msg_param_count[ptrParam])&0x00FF);	//
+
+					for(i=0;i<srcMsg.msg_param_count[ptrParam];i++){
+						mqttMsgTX[ptrChar++]=srcMsg.msg_string_array[ptrParam][i];
 					}
 				}
 	}
@@ -529,18 +568,22 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 		unsigned char i, j;
 		unsigned char ptrParam;
 
-	    for (i=0;i<10;i++)
+	    for (i=0;i<RXTXSTACK_SIZE;i++)
 	    {
-	    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, cmd value: %d",i,msgStack[i].topicName, ((msgStack[i].msg_id&0xFF000000)>>24), msgStack[i].msg_id, msgStack[i].msg_type,
+	    	printf("\n#%d Algo Topic: %s, Sender: %x, message ID: %d, command: %d, cmd value: %d",i,msgStack[i].topic, ((msgStack[i].msg_id&0xFF000000)>>24), msgStack[i].msg_id, msgStack[i].msg_type,
 	    	    		    			msgStack[i].msg_type_value);
 	    	for(ptrParam=0;msgStack[i].msg_param[ptrParam]!=0;ptrParam++){
 
 	    	 if(msgStack[i].msg_param[ptrParam]==PS_1)
-
 	    		 printf("\n        value: %d",msgStack[i].msg_param_value[ptrParam]);
+
 	    	 if(msgStack[i].msg_param[ptrParam]==PSA_1){
 	    		 printf("\n        array: ");
 	    		 for(j=0;j<msgStack[i].msg_param_count[ptrParam];j++) printf("%d ", msgStack[i].msg_param_array[ptrParam][j]);
+	    	 }
+	    	 if(msgStack[i].msg_param[ptrParam]==PCA_1){
+	    		 printf("\n        string: ");
+	    		 printf("%s ", msgStack[i].msg_string_array[ptrParam]);
 	    	 }
 	    	}
 	    	printf("\n");
@@ -548,50 +591,127 @@ int mqtt_init(const char *IPaddress, const char *clientID, MQTTClient_messageArr
 	    printf("\n");
 	}
 
+
+
+
 	// -------------------------------------------------------------------
 	// EFFACE LE BUFFER ALGOID TX
 	// -------------------------------------------------------------------
-	void algo_clearTX(void){
+	void algo_clearMessage(ALGOID algMsg){
+
 		unsigned char i, ptrParam;
 
-		algoidMsgTX.msg_id=0;
-		algoidMsgTX.msg_type=0;
-		algoidMsgTX.msg_type_value=0;
+		strcpy(algMsg.topic, "");
+		algMsg.msg_id=0;
+		algMsg.msg_type=0;
+		algMsg.msg_type_value=0;
 		for(ptrParam=0;ptrParam<MAXPARAM;ptrParam++){
-			algoidMsgTX.msg_param[ptrParam]=0;
-			algoidMsgTX.msg_param_count[ptrParam]=0;
-			algoidMsgTX.msg_param_value[ptrParam]=0;
-			for(i=0;i<MAX_SHORT_ARRAY;i++) algoidMsgTX.msg_param_array[ptrParam][i]=0;
+			algMsg.msg_param[ptrParam]=0;
+			algMsg.msg_param_count[ptrParam]=0;
+			algMsg.msg_param_value[ptrParam]=0;
+			for(i=0;i<MAX_SHORT_ARRAY;i++){
+				algMsg.msg_param_array[ptrParam][i]=0;
+				algMsg.msg_string_array[ptrParam][i]=0;
+			}
 		}
-		for(i=0;i<sizeof(algoidMsgTX.topicName);i++)algoidMsgTX.topicName[i]=0;
+		//for(i=0;i<strlen(message.topic);i++)message.topic[i]=0;
 	}
 
 	// -------------------------------------------------------------------
 	// Envoie le message aalgoid en file d'attente
 	// -------------------------------------------------------------------
-	void SendQueueingTXmsg(ALGOID *msgStack){
+	char SendQueueingTXmsg(ALGOID *msgStack){
     	int result;
     	unsigned char nbChar, i;
     	char PAYLOADTX[MAXMQTTBYTE]={1,00,02,255,255,02,0,04, 0x15, 02, 0xaa, 0xaa, 0xa2, 0, 3, 61, 62, 63, 0,0};
 
+    	// Controle la présence d'un message dans la pile (=MSGID)
     	if(msgStack[0].msg_id != 0){
-    		// Construction de la trame MQTT avec le message ALGOID
-    		// Récupère le nombre d'octet MQTT a envoyer
-    		nbChar = buildMqttMsg(PAYLOADTX, msgStack[0]);
-    		algo_clearTX();
 
-    		// Envoie du message sur TOPIC_TX DU BROCKER
-    		result=algo_putMessage(TOPIC_TX,PAYLOADTX, nbChar);
-    		if(result)
-    			printf("\n!!! ERREUR:  MESSAGE MQTT NON ENVOYE !!!");			// Erreur de transmission
-    		else {
-    			for(i=0;i<9;i++){												// Descente des message dans la pile
-    				msgStack[i]=msgStack[i+1];
-    			}
-    			algo_clearStack(9, msgStack);							// Liberation d'un espace dans la pile
-    		}
+    			// Construction de la trame MQTT avec le message ALGOID
+				// Récupère le nombre d'octet MQTT a envoyer
+				nbChar = buildMqttMsg(PAYLOADTX, msgStack[0]);
+				//algo_clearTX();
+
+				// Envoie du message sur TOPIC_TX DU BROCKER
+				result=algo_putMessage(msgStack[0].topic,PAYLOADTX, nbChar);
+				if(result){
+					return -1;
+					printf("\nERREUR, MESSAGE EN FILE MQTT NON ENVOYE");			// Erreur de transmission
+				}
+				else {
+
+					for(i=0;i<RXTXSTACK_SIZE-1;i++){												// Descente des message dans la pile
+						msgStack[i]=msgStack[i+1];
+					}
+					algo_clearMessage(msgStack[RXTXSTACK_SIZE-1]);									// Liberation d'un espace dans la pile
+					return 1;
+				}
+
     	}
+    	else return 0;
 	}
+
+
+	// -------------------------------------------------------------------
+	// Défini le topic sur lequel doit se connecter Eduspider pour la Transmission
+	// -------------------------------------------------------------------
+	char algoSetTXChannel(char * topicName){
+		strcpy(TOPIC_TX,topicName);
+		return 0;
+	}
+
+	// -------------------------------------------------------------------
+	// Défini le topic sur lequel doit se connecter Eduspider pour la Reception
+	// -------------------------------------------------------------------
+	char algoAddRXChannel(char * topicName){
+		// SOUSCRIPTION AU TOPIC MANAGER
+		printf("\n - Inscription topic %s",topicName);
+
+		// Configuration souscription
+		if(!MQTTClient_subscribe(client, topicName, QOS))printf(": OK");
+		else printf(": Erreur d'inscription au topic");
+		return 0;
+	}
+
+	// -------------------------------------------------------------------
+	// Desabonnement a un canal algoid
+	// -------------------------------------------------------------------
+	char algoRemoveRXChannel(char * topicName){
+		// SOUSCRIPTION AU TOPIC MANAGER
+		printf("\n - desinscription topic %s",topicName);
+
+		// Configuration souscription
+		if(!MQTTClient_unsubscribe(client, topicName))printf(": OK");
+		else printf(": Erreur de desinscription au topic");
+		return 0;
+	}
+
+
+// ---------------------------------------------------------------------------
+// TRAITEMENT DU MESSAGE DE NEGOCIATION AVEC LE MANAGER
+// ---------------------------------------------------------------------------
+char processNegociation(ALGOID message){
+
+	switch(message.msg_type_value){
+		case NEGOC_ONLINE : break;
+		case NEGOC_OFFLINE : break;
+		case NEGOC_TX_CHANNEL : algoSetTXChannel(message.msg_string_array[1]);
+									break;
+		case NEGOC_ADD_RX_CHANNEL : algoAddRXChannel(message.msg_string_array[1]);
+									printf("\n - Ajout canal d écoute sur topic: %s", message.msg_string_array[1]);
+									break;
+		case NEGOC_REM_RX_CHANNEL : if(strcmp(message.msg_string_array[1], TOPIC_MGR)){			 // Ne desincrit pas le topic manager
+										algoRemoveRXChannel(message.msg_string_array[1]);
+										printf("\n - Suppression canal d'écoute: %s", message.msg_string_array[1]);
+									}else printf(" - Suppression canal d'écoute %s impossible", message.msg_string_array[1]);
+									break;
+		default : break;
+	}
+
+	//algo_clearMessage(message);
+	return 0;
+}
 
 	// ---------------------------------------------------------------------------
 	// CREATION THREAD UART
